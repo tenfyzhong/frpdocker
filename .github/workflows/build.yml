@@ -1,0 +1,32 @@
+name: Build and test FRP image
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (includes upstream unit tests)
+        run: docker build --progress plain -t frp-test .
+      - name: Smoke test unchanged FRP version
+        run: |
+          test "$(docker run --rm frp-test /frps --version)" = "0.20.0"
+          test "$(docker run --rm frp-test /frpc --version)" = "0.20.0"
+      - name: Smoke test default server configuration
+        run: |
+          docker run -d --name frp-smoke frp-test
+          trap 'docker logs frp-smoke; docker rm -f frp-smoke' EXIT
+          sleep 3
+          test "$(docker inspect -f '{{.State.Running}}' frp-smoke)" = "true"
+      - name: Verify client/server TCP forwarding from image binaries
+        run: |
+          mkdir -p "$RUNNER_TEMP/frp-bin"
+          docker create --name frp-extract frp-test
+          docker cp frp-extract:/frpc "$RUNNER_TEMP/frp-bin/frpc"
+          docker cp frp-extract:/frps "$RUNNER_TEMP/frp-bin/frps"
+          docker rm frp-extract
+          python3 tests/smoke.py "$RUNNER_TEMP/frp-bin"
